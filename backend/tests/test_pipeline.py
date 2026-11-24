@@ -31,6 +31,7 @@ from app.services.history_archive import HistoryArchiveService
 from app.services.exchange_replay import ExchangeReplayService
 from app.services.sla_monitor import SlaMonitorService
 from app.services.channel_config import ChannelConfigService
+from app.services.transfer_delivery import TransferDeliveryService
 from app.store import store
 
 
@@ -296,6 +297,7 @@ class TestCrossModuleSnapshot:
         ("exchange_replay", ExchangeReplayService),
         ("sla_monitor", SlaMonitorService),
         ("channel_config", ChannelConfigService),
+        ("transfer_delivery", TransferDeliveryService),
     ]
 
     @pytest.mark.parametrize("mod_name,cls", MODULES)

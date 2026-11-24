@@ -11,12 +11,15 @@
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端
 │   ├── src/views/WorkbenchView.vue|tsx  全部模块共享工作台
+│   ├── src/views/DeliveryView.vue       传输交付数据包页面
 │   ├── src/data/modules.ts              18个业务模块配置
 │   ├── src/api/              统一请求封装
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/delivery.py  传输交付数据包接口
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
+│   ├── app/services/transfer_delivery.py  交付包打包/下载/核验
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
 ├── .gitignore
@@ -68,6 +71,46 @@ npm run dev
 | 历史重放 | `exchange_replay` | 重放任务 | 重放编号、归档编号、重放范围 |
 | 时效监控 | `sla_monitor` | 时效指标 | 指标编号、源端编号、约定到达时限 |
 | 通道配置 | `channel_config` | 传输通道 | 通道编号、传输协议、并发连接数 |
+| 传输交付数据包 | `transfer_delivery` | 交付包 | 交付编号、批次编号、采用回执、交付校验值 |
+
+## 传输交付数据包
+
+通用导出只输出模块登记清单（csv）。`transfer_delivery` 提供的是**实际下载包**：
+按批号生成 zip，内含该批次的实际传输分片、`delivery_manifest.json` 清单和采用的
+暂存确认回执，可用下载件逐片复算校验。
+
+### 数据来源与一致性
+
+- 传输批次执行时按分片大小把数据写成 `data/batches/<批次号>/chunk_*.jsonl`，并写下
+  `chunks.json` 分片清单（序号、条数、字节数、逐片 SHA256）。
+- 暂存落地按同样的分片边界写入 `data/staging/<暂存编号>/`，确认落地时读取**实际可读取
+  的分片字节**生成暂存回执 `data/receipts/<批次号>/<暂存编号>.json`。同一批次可以先后
+  多次暂存确认，第二次可以改用不同落地路径，先前回执不会被覆盖。
+- 打包开始即冻结采用回执及其分片字节；打包期间即使同批次又完成了一次新路径暂存确认，
+  也不会混入本包的数据或清单，只会作为“快照后观察记录”写进清单提示。
+
+### 接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/delivery/receipts?batch=` | 列出批次全部暂存回执（含先前回执） |
+| POST | `/api/delivery/package` | 按批号打包：`{batch, receipt_code?, landing_path?, confirm_landing_path?}` |
+| GET | `/api/delivery/deliveries?batch=` | 列出正式交付记录（不含中断尝试） |
+| GET | `/api/delivery/{交付号}/download` | 按交付号下载已正式交付包（中断重下后仍可下载） |
+| POST | `/api/delivery/{交付号}/verify` | 按交付号核验 |
+| POST | `/api/delivery/{交付号}/landing-verify` | 目标端落地校验，给出另一轮待校验范围 |
+| POST | `/api/delivery/verify-upload[?batch=]` | 上传下载件 zip 原始字节复算 |
+
+### 关键语义
+
+- 只输入批号即可打包，默认采用最新暂存回执；`confirm_landing_path=true` 时要求采用回执的
+  落地路径必须等于 `landing_path`（成包前确认新路径）。
+- 打包中断（含请求带 `interrupt_after_chunks`）不产生正式交付记录，只留审计记录；
+  重做后按交付号可看到多次正式交付。
+- 核验结果包含：清单自校验、逐片复算、采用回执与包内分片的关联、后续待校验范围
+  （比采用回执更晚确认的回执，含包内快照后观察到的回执与当前回执账）。
+- 若采用了较早回执，`another_round_required=true`，并给出另一轮校验的回执、落地路径与分片范围。
+
 
 ## 约定
 
